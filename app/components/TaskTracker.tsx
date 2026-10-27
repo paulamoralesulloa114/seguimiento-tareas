@@ -14,6 +14,7 @@ import {
 } from "../lib/tareas";
 import { IconoCalendario, IconoMas } from "./Iconos";
 import TaskForm from "./TaskForm";
+import Mascota from "./Mascota";
 import TaskItem from "./TaskItem";
 import WeeklyCalendar from "./WeeklyCalendar";
 
@@ -31,6 +32,7 @@ export default function TaskTracker() {
   const [resaltadaId, setResaltadaId] = useState<string | null>(null);
   const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
   const seccionLista = useRef<HTMLElement>(null);
+  const [celebraciones, setCelebraciones] = useState(0);
 
   // Cargar desde localStorage solo en el cliente, después del primer render
   useEffect(() => {
@@ -96,6 +98,7 @@ export default function TaskTracker() {
   }
 
   function alternarEstado(id: string) {
+    if (tareas.find((t) => t.id === id)?.estado === "pendiente") setCelebraciones((n) => n + 1);
     setTareas((prev) =>
       prev.map((t) => (t.id === id ? { ...t, estado: t.estado === "hecha" ? "pendiente" : "hecha" } : t)),
     );
@@ -155,6 +158,14 @@ export default function TaskTracker() {
           <Estadistica etiqueta="Hechas" valor={cargado ? hechas : "–"} clase="text-emerald-600 dark:text-emerald-400" />
         </dl>
       </header>
+
+      <div className="mb-4 sm:mb-6">
+        {cargado ? (
+          <Mascota tareas={tareas} celebraciones={celebraciones} />
+        ) : (
+          <div className="h-36 animate-pulse rounded-3xl bg-zinc-100 sm:h-44 dark:bg-zinc-900" />
+        )}
+      </div>
 
       <div className="mb-6 sm:mb-8">
         {cargado ? (
