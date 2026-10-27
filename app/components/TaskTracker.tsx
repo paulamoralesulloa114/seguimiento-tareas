@@ -1,97 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  cargarTareas,
+  compararTareas,
+  estaVencida,
+  nuevoId,
+  STORAGE_KEY,
+  type Borrador,
+  type Filtro,
+  type Tarea,
+} from "../lib/tareas";
+import { IconoMas } from "./Iconos";
+import TaskForm from "./TaskForm";
+import TaskItem from "./TaskItem";
+import WeeklyCalendar from "./WeeklyCalendar";
 
-type Prioridad = "alta" | "media" | "baja";
-type Estado = "pendiente" | "hecha";
-type Filtro = "todas" | "pendientes" | "hechas";
-
-interface Tarea {
-  id: string;
-  titulo: string;
-  prioridad: Prioridad;
-  fechaLimite: string | null; // formato YYYY-MM-DD
-  estado: Estado;
-}
-
-const STORAGE_KEY = "seguimiento-tareas:v1";
-
-const ORDEN_PRIORIDAD: Record<Prioridad, number> = { alta: 0, media: 1, baja: 2 };
-
-const ETIQUETA_PRIORIDAD: Record<Prioridad, string> = {
-  alta: "Alta",
-  media: "Media",
-  baja: "Baja",
-};
-
-const ESTILO_PRIORIDAD: Record<Prioridad, string> = {
-  alta: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
-  media: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  baja: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
-};
-
-function hoyISO(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-function estaVencida(t: Tarea): boolean {
-  return t.estado === "pendiente" && t.fechaLimite !== null && t.fechaLimite < hoyISO();
-}
-
-function formatearFecha(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("es", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function compararTareas(a: Tarea, b: Tarea): number {
-  const p = ORDEN_PRIORIDAD[a.prioridad] - ORDEN_PRIORIDAD[b.prioridad];
-  if (p !== 0) return p;
-  // Las tareas sin fecha van al final
-  if (a.fechaLimite === b.fechaLimite) return 0;
-  if (a.fechaLimite === null) return 1;
-  if (b.fechaLimite === null) return -1;
-  return a.fechaLimite.localeCompare(b.fechaLimite);
-}
-
-function cargarTareas(): Tarea[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    return Array.isArray(data) ? data : [];
-  } catch {
-    return [];
-  }
-}
-
-function nuevoId(): string {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-interface Borrador {
-  titulo: string;
-  prioridad: Prioridad;
-  fechaLimite: string;
-}
-
-const BORRADOR_VACIO: Borrador = { titulo: "", prioridad: "media", fechaLimite: "" };
+const FILTROS: [Filtro, string][] = [
+  ["todas", "Todas"],
+  ["pendientes", "Pendientes"],
+  ["hechas", "Hechas"],
+];
 
 export default function TaskTracker() {
   const [tareas, setTareas] = useState<Tarea[]>([]);
   const [cargado, setCargado] = useState(false);
   const [filtro, setFiltro] = useState<Filtro>("todas");
-  const [borrador, setBorrador] = useState<Borrador>(BORRADOR_VACIO);
   const [editandoId, setEditandoId] = useState<string | null>(null);
-  const [edicion, setEdicion] = useState<Borrador>(BORRADOR_VACIO);
+  const [resaltadaId, setResaltadaId] = useState<string | null>(null);
 
   // Cargar desde localStorage solo en el cliente, después del primer render
   useEffect(() => {
@@ -110,7 +46,17 @@ export default function TaskTracker() {
     }
   }, [tareas, cargado]);
 
+  // Al elegir una tarea en el calendario, llevarla a la vista y resaltarla un momento
+  useEffect(() => {
+    if (!resaltadaId) return;
+    document.getElementById(`tarea-${resaltadaId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => setResaltadaId(null), 1800);
+    return () => clearTimeout(t);
+  }, [resaltadaId]);
+
   const pendientes = tareas.filter((t) => t.estado === "pendiente").length;
+  const hechas = tareas.length - pendientes;
+  const vencidas = tareas.filter(estaVencida).length;
 
   const visibles = useMemo(() => {
     const filtradas = tareas.filter((t) =>
@@ -119,21 +65,29 @@ export default function TaskTracker() {
     return [...filtradas].sort(compararTareas);
   }, [tareas, filtro]);
 
-  function agregar(e: React.FormEvent) {
-    e.preventDefault();
-    const titulo = borrador.titulo.trim();
-    if (!titulo) return;
+  function agregar(b: Borrador) {
     setTareas((prev) => [
       ...prev,
       {
         id: nuevoId(),
-        titulo,
-        prioridad: borrador.prioridad,
-        fechaLimite: borrador.fechaLimite || null,
+        titulo: b.titulo,
+        descripcion: b.descripcion,
+        prioridad: b.prioridad,
+        fechaLimite: b.fechaLimite || null,
         estado: "pendiente",
       },
     ]);
-    setBorrador({ ...BORRADOR_VACIO, prioridad: borrador.prioridad });
+  }
+
+  function guardarEdicion(id: string, b: Borrador) {
+    setTareas((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? { ...t, titulo: b.titulo, descripcion: b.descripcion, prioridad: b.prioridad, fechaLimite: b.fechaLimite || null }
+          : t,
+      ),
+    );
+    setEditandoId(null);
   }
 
   function alternarEstado(id: string) {
@@ -147,250 +101,117 @@ export default function TaskTracker() {
     if (editandoId === id) setEditandoId(null);
   }
 
-  function empezarEdicion(t: Tarea) {
-    setEditandoId(t.id);
-    setEdicion({ titulo: t.titulo, prioridad: t.prioridad, fechaLimite: t.fechaLimite ?? "" });
+  function seleccionarDesdeCalendario(id: string) {
+    const t = tareas.find((x) => x.id === id);
+    if (!t) return;
+    const visible = filtro === "todas" || (filtro === "pendientes") === (t.estado === "pendiente");
+    if (!visible) setFiltro("todas");
+    setResaltadaId(id);
   }
 
-  function guardarEdicion(e: React.FormEvent) {
-    e.preventDefault();
-    const titulo = edicion.titulo.trim();
-    if (!titulo || !editandoId) return;
-    setTareas((prev) =>
-      prev.map((t) =>
-        t.id === editandoId
-          ? { ...t, titulo, prioridad: edicion.prioridad, fechaLimite: edicion.fechaLimite || null }
-          : t,
-      ),
-    );
-    setEditandoId(null);
-  }
-
-  const inputBase =
-    "rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base text-zinc-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:ring-indigo-900";
+  const fechaHoy = cargado
+    ? new Date().toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })
+    : "";
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-8 sm:py-12">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Seguimiento de tareas</h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          {cargado ? (
-            pendientes === 0 ? (
-              "No tienes tareas pendientes 🎉"
-            ) : (
-              <>
-                Tienes <span className="font-semibold text-zinc-900 dark:text-zinc-100">{pendientes}</span>{" "}
-                {pendientes === 1 ? "tarea pendiente" : "tareas pendientes"}
-              </>
-            )
-          ) : (
-            "Cargando…"
-          )}
-        </p>
+    <main className="relative mx-auto w-full max-w-6xl px-4 pb-16 pt-8 sm:px-6 sm:pt-12">
+      {/* Fondo decorativo */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-96 bg-[radial-gradient(60%_60%_at_20%_0%,rgba(139,92,246,0.18),transparent),radial-gradient(50%_50%_at_90%_10%,rgba(99,102,241,0.14),transparent)]"
+      />
+
+      <header className="mb-6 flex flex-col gap-5 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="min-h-5 text-sm font-medium first-letter:uppercase text-violet-600 dark:text-violet-400">{fechaHoy}</p>
+          <h1 className="mt-1 text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl dark:text-white">
+            Mis tareas
+          </h1>
+        </div>
+        <dl className="grid grid-cols-3 gap-2 sm:flex">
+          <Estadistica etiqueta="Pendientes" valor={cargado ? pendientes : "–"} clase="text-violet-700 dark:text-violet-300" />
+          <Estadistica
+            etiqueta="Vencidas"
+            valor={cargado ? vencidas : "–"}
+            clase={vencidas > 0 ? "text-red-600 dark:text-red-400" : "text-zinc-400"}
+          />
+          <Estadistica etiqueta="Hechas" valor={cargado ? hechas : "–"} clase="text-emerald-600 dark:text-emerald-400" />
+        </dl>
       </header>
 
-      {/* Formulario para agregar */}
-      <form
-        onSubmit={agregar}
-        className="mb-6 flex flex-col gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50"
-      >
-        <label className="sr-only" htmlFor="nueva-tarea">
-          Nueva tarea
-        </label>
-        <input
-          id="nueva-tarea"
-          className={inputBase}
-          placeholder="¿Qué tienes que hacer?"
-          value={borrador.titulo}
-          onChange={(e) => setBorrador({ ...borrador, titulo: e.target.value })}
-        />
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            Prioridad
-            <select
-              className={inputBase}
-              value={borrador.prioridad}
-              onChange={(e) => setBorrador({ ...borrador, prioridad: e.target.value as Prioridad })}
-            >
-              <option value="alta">Alta</option>
-              <option value="media">Media</option>
-              <option value="baja">Baja</option>
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-            Fecha límite (opcional)
-            <input
-              type="date"
-              className={inputBase}
-              value={borrador.fechaLimite}
-              onChange={(e) => setBorrador({ ...borrador, fechaLimite: e.target.value })}
-            />
-          </label>
-        </div>
-        <button
-          type="submit"
-          disabled={!borrador.titulo.trim()}
-          className="rounded-lg bg-indigo-600 px-4 py-2.5 font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Agregar tarea
-        </button>
-      </form>
-
-      {/* Filtros */}
-      <div className="mb-4 flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900" role="tablist">
-        {(
-          [
-            ["todas", "Todas"],
-            ["pendientes", "Pendientes"],
-            ["hechas", "Hechas"],
-          ] as [Filtro, string][]
-        ).map(([valor, etiqueta]) => (
-          <button
-            key={valor}
-            role="tab"
-            aria-selected={filtro === valor}
-            onClick={() => setFiltro(valor)}
-            className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
-              filtro === valor
-                ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-            }`}
-          >
-            {etiqueta}
-          </button>
-        ))}
+      <div className="mb-6 sm:mb-8">
+        {cargado ? (
+          <WeeklyCalendar tareas={tareas} onSeleccionar={seleccionarDesdeCalendario} />
+        ) : (
+          <div className="h-56 animate-pulse rounded-3xl bg-zinc-100 dark:bg-zinc-900" />
+        )}
       </div>
 
-      {/* Lista */}
-      {cargado && visibles.length === 0 && (
-        <p className="rounded-xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          {tareas.length === 0 ? "Aún no hay tareas. ¡Agrega la primera!" : "No hay tareas en este filtro."}
-        </p>
-      )}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
+        <section className="rounded-3xl border border-zinc-200/80 bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 lg:sticky lg:top-6 dark:border-zinc-800 dark:bg-zinc-900/70">
+          <h2 className="mb-4 flex items-center gap-2 text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
+              <IconoMas className="h-4 w-4" />
+            </span>
+            Nueva tarea
+          </h2>
+          <TaskForm textoBoton="Agregar tarea" onGuardar={agregar} limpiarAlGuardar />
+        </section>
 
-      <ul className="flex flex-col gap-2">
-        {visibles.map((t) => {
-          const vencida = estaVencida(t);
-          const hecha = t.estado === "hecha";
-
-          if (editandoId === t.id) {
-            return (
-              <li
-                key={t.id}
-                className="rounded-xl border border-indigo-300 bg-white p-3 dark:border-indigo-800 dark:bg-zinc-900"
+        <section>
+          <div className="mb-4 flex gap-1 rounded-2xl bg-zinc-200/60 p-1 dark:bg-zinc-900" role="tablist">
+            {FILTROS.map(([valor, etiqueta]) => (
+              <button
+                key={valor}
+                role="tab"
+                aria-selected={filtro === valor}
+                onClick={() => setFiltro(valor)}
+                className={`flex-1 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  filtro === valor
+                    ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                    : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
               >
-                <form onSubmit={guardarEdicion} className="flex flex-col gap-2">
-                  <input
-                    autoFocus
-                    className={inputBase}
-                    value={edicion.titulo}
-                    onChange={(e) => setEdicion({ ...edicion, titulo: e.target.value })}
-                    aria-label="Título"
-                  />
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <select
-                      className={`${inputBase} flex-1`}
-                      value={edicion.prioridad}
-                      onChange={(e) => setEdicion({ ...edicion, prioridad: e.target.value as Prioridad })}
-                      aria-label="Prioridad"
-                    >
-                      <option value="alta">Alta</option>
-                      <option value="media">Media</option>
-                      <option value="baja">Baja</option>
-                    </select>
-                    <input
-                      type="date"
-                      className={`${inputBase} flex-1`}
-                      value={edicion.fechaLimite}
-                      onChange={(e) => setEdicion({ ...edicion, fechaLimite: e.target.value })}
-                      aria-label="Fecha límite"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEditandoId(null)}
-                      className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={!edicion.titulo.trim()}
-                      className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      Guardar
-                    </button>
-                  </div>
-                </form>
-              </li>
-            );
-          }
+                {etiqueta}
+              </button>
+            ))}
+          </div>
 
-          return (
-            <li
-              key={t.id}
-              className={`flex items-start gap-3 rounded-xl border p-3 transition ${
-                vencida
-                  ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40"
-                  : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={hecha}
-                onChange={() => alternarEstado(t.id)}
-                aria-label={hecha ? "Marcar como pendiente" : "Marcar como hecha"}
-                className="mt-1 h-5 w-5 shrink-0 cursor-pointer accent-indigo-600"
+          {cargado && visibles.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-zinc-300 px-6 py-12 text-center dark:border-zinc-700">
+              <p className="text-3xl">{tareas.length === 0 ? "📝" : "✨"}</p>
+              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                {tareas.length === 0 ? "Aún no hay tareas. ¡Agrega la primera!" : "No hay tareas en este filtro."}
+              </p>
+            </div>
+          )}
+
+          <ul className="flex flex-col gap-2.5">
+            {visibles.map((t) => (
+              <TaskItem
+                key={t.id}
+                tarea={t}
+                editando={editandoId === t.id}
+                resaltada={resaltadaId === t.id}
+                onAlternar={() => alternarEstado(t.id)}
+                onEditar={() => setEditandoId(t.id)}
+                onGuardar={(b) => guardarEdicion(t.id, b)}
+                onCancelar={() => setEditandoId(null)}
+                onEliminar={() => eliminar(t.id)}
               />
-              <div className="min-w-0 flex-1">
-                <p
-                  className={`break-words font-medium ${
-                    hecha
-                      ? "text-zinc-400 line-through dark:text-zinc-500"
-                      : vencida
-                        ? "text-red-700 dark:text-red-300"
-                        : ""
-                  }`}
-                >
-                  {t.titulo}
-                </p>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                  <span className={`rounded-full px-2 py-0.5 font-medium ${ESTILO_PRIORIDAD[t.prioridad]}`}>
-                    {ETIQUETA_PRIORIDAD[t.prioridad]}
-                  </span>
-                  {t.fechaLimite && (
-                    <span
-                      className={
-                        vencida ? "font-semibold text-red-600 dark:text-red-400" : "text-zinc-500 dark:text-zinc-400"
-                      }
-                    >
-                      {vencida ? "Vencida · " : "Vence "}
-                      {formatearFecha(t.fechaLimite)}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <button
-                  onClick={() => empezarEdicion(t)}
-                  className="rounded-md px-2 py-1 text-sm text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                  aria-label={`Editar ${t.titulo}`}
-                >
-                  Editar
-                </button>
-                <button
-                  onClick={() => eliminar(t.id)}
-                  className="rounded-md px-2 py-1 text-sm text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                  aria-label={`Eliminar ${t.titulo}`}
-                >
-                  Eliminar
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+            ))}
+          </ul>
+        </section>
+      </div>
     </main>
+  );
+}
+
+function Estadistica({ etiqueta, valor, clase }: { etiqueta: string; valor: number | string; clase: string }) {
+  return (
+    <div className="rounded-2xl border border-zinc-200/80 bg-white/80 px-4 py-2.5 text-center shadow-sm backdrop-blur sm:min-w-24 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <dd className={`text-2xl font-bold tabular-nums ${clase}`}>{valor}</dd>
+      <dt className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{etiqueta}</dt>
+    </div>
   );
 }
