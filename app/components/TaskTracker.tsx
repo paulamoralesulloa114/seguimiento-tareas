@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cargarTareas,
   compararTareas,
+  desdeISO,
   estaVencida,
   nuevoId,
   STORAGE_KEY,
@@ -11,7 +12,7 @@ import {
   type Filtro,
   type Tarea,
 } from "../lib/tareas";
-import { IconoMas } from "./Iconos";
+import { IconoCalendario, IconoMas } from "./Iconos";
 import TaskForm from "./TaskForm";
 import TaskItem from "./TaskItem";
 import WeeklyCalendar from "./WeeklyCalendar";
@@ -28,6 +29,8 @@ export default function TaskTracker() {
   const [filtro, setFiltro] = useState<Filtro>("todas");
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [resaltadaId, setResaltadaId] = useState<string | null>(null);
+  const [diaSeleccionado, setDiaSeleccionado] = useState<string | null>(null);
+  const seccionLista = useRef<HTMLElement>(null);
 
   // Cargar desde localStorage solo en el cliente, después del primer render
   useEffect(() => {
@@ -59,11 +62,13 @@ export default function TaskTracker() {
   const vencidas = tareas.filter(estaVencida).length;
 
   const visibles = useMemo(() => {
-    const filtradas = tareas.filter((t) =>
-      filtro === "todas" ? true : filtro === "pendientes" ? t.estado === "pendiente" : t.estado === "hecha",
+    const filtradas = tareas.filter(
+      (t) =>
+        (filtro === "todas" ? true : filtro === "pendientes" ? t.estado === "pendiente" : t.estado === "hecha") &&
+        (diaSeleccionado === null || t.fechaLimite === diaSeleccionado),
     );
     return [...filtradas].sort(compararTareas);
-  }, [tareas, filtro]);
+  }, [tareas, filtro, diaSeleccionado]);
 
   function agregar(b: Borrador) {
     setTareas((prev) => [
@@ -106,7 +111,19 @@ export default function TaskTracker() {
     if (!t) return;
     const visible = filtro === "todas" || (filtro === "pendientes") === (t.estado === "pendiente");
     if (!visible) setFiltro("todas");
+    setDiaSeleccionado(t.fechaLimite);
     setResaltadaId(id);
+  }
+
+  // Tocar el día seleccionado otra vez quita el filtro
+  function alternarDia(iso: string) {
+    const quitar = diaSeleccionado === iso;
+    setDiaSeleccionado(quitar ? null : iso);
+    // En el celular la lista queda debajo del formulario: bajar hasta ella si no se ve
+    const lista = seccionLista.current;
+    if (!quitar && lista && lista.getBoundingClientRect().top > window.innerHeight * 0.75) {
+      requestAnimationFrame(() => lista.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
   }
 
   const fechaHoy = cargado
@@ -141,7 +158,12 @@ export default function TaskTracker() {
 
       <div className="mb-6 sm:mb-8">
         {cargado ? (
-          <WeeklyCalendar tareas={tareas} onSeleccionar={seleccionarDesdeCalendario} />
+          <WeeklyCalendar
+            tareas={tareas}
+            onSeleccionar={seleccionarDesdeCalendario}
+            diaSeleccionado={diaSeleccionado}
+            onSeleccionarDia={alternarDia}
+          />
         ) : (
           <div className="h-56 animate-pulse rounded-3xl bg-zinc-100 dark:bg-zinc-900" />
         )}
@@ -158,7 +180,7 @@ export default function TaskTracker() {
           <TaskForm textoBoton="Agregar tarea" onGuardar={agregar} limpiarAlGuardar />
         </section>
 
-        <section>
+        <section ref={seccionLista} className="scroll-mt-4">
           <div className="mb-4 flex gap-1 rounded-2xl bg-zinc-200/60 p-1 dark:bg-zinc-900" role="tablist">
             {FILTROS.map(([valor, etiqueta]) => (
               <button
@@ -177,11 +199,39 @@ export default function TaskTracker() {
             ))}
           </div>
 
+          {diaSeleccionado && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl bg-violet-50 px-4 py-2.5 text-sm text-violet-900 ring-1 ring-violet-200 dark:bg-violet-500/10 dark:text-violet-200 dark:ring-violet-500/30">
+              <span className="flex items-center gap-2">
+                <IconoCalendario className="h-4 w-4 shrink-0" />
+                <span>
+                  Tareas del{" "}
+                  <strong className="font-semibold">
+                    {desdeISO(diaSeleccionado).toLocaleDateString("es", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                    })}
+                  </strong>
+                </span>
+              </span>
+              <button
+                onClick={() => setDiaSeleccionado(null)}
+                className="shrink-0 rounded-lg px-2 py-1 font-medium text-violet-700 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-500/20"
+              >
+                Ver todas
+              </button>
+            </div>
+          )}
+
           {cargado && visibles.length === 0 && (
             <div className="rounded-3xl border border-dashed border-zinc-300 px-6 py-12 text-center dark:border-zinc-700">
               <p className="text-3xl">{tareas.length === 0 ? "📝" : "✨"}</p>
               <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                {tareas.length === 0 ? "Aún no hay tareas. ¡Agrega la primera!" : "No hay tareas en este filtro."}
+                {tareas.length === 0
+                  ? "Aún no hay tareas. ¡Agrega la primera!"
+                  : diaSeleccionado
+                    ? "No hay tareas para este día."
+                    : "No hay tareas en este filtro."}
               </p>
             </div>
           )}

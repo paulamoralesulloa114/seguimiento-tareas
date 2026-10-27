@@ -7,6 +7,8 @@ import { IconoDerecha, IconoIzquierda } from "./Iconos";
 interface Props {
   tareas: Tarea[];
   onSeleccionar: (id: string) => void;
+  diaSeleccionado: string | null;
+  onSeleccionarDia: (iso: string) => void;
 }
 
 function rangoSemana(lunes: Date): string {
@@ -18,7 +20,7 @@ function rangoSemana(lunes: Date): string {
     : `${lunes.getDate()} ${mesL} – ${domingo.getDate()} ${mesD}`;
 }
 
-export default function WeeklyCalendar({ tareas, onSeleccionar }: Props) {
+export default function WeeklyCalendar({ tareas, onSeleccionar, diaSeleccionado, onSeleccionarDia }: Props) {
   const [desfase, setDesfase] = useState(0); // semanas desde la actual
   const contenedor = useRef<HTMLDivElement>(null);
   const hoy = hoyISO();
@@ -106,17 +108,27 @@ export default function WeeklyCalendar({ tareas, onSeleccionar }: Props) {
           const esHoy = iso === hoy;
           const pasado = iso < hoy;
           const lista = porDia.get(iso) ?? [];
+          const seleccionado = iso === diaSeleccionado;
           return (
+            // Tocar cualquier parte del día lo selecciona; el botón del encabezado lo hace accesible por teclado
             <div
               key={iso}
               data-hoy={esHoy || undefined}
-              className={`flex min-h-36 w-[8.5rem] shrink-0 snap-start flex-col rounded-2xl p-2 sm:w-auto ${
-                esHoy
-                  ? "bg-violet-50 ring-1 ring-violet-200 dark:bg-violet-500/10 dark:ring-violet-500/30"
-                  : "bg-zinc-50 dark:bg-zinc-800/40"
+              onClick={() => onSeleccionarDia(iso)}
+              className={`flex min-h-36 w-[8.5rem] shrink-0 cursor-pointer snap-start flex-col rounded-2xl p-2 transition sm:w-auto ${
+                seleccionado
+                  ? "bg-violet-100 ring-2 ring-violet-500 dark:bg-violet-500/20 dark:ring-violet-400"
+                  : esHoy
+                    ? "bg-violet-50 ring-1 ring-violet-200 hover:ring-violet-300 dark:bg-violet-500/10 dark:ring-violet-500/30"
+                    : "bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-800/40 dark:hover:bg-zinc-800/70"
               }`}
             >
-              <div className="mb-2 flex items-center gap-2 px-1">
+              <button
+                type="button"
+                aria-pressed={seleccionado}
+                aria-label={`Ver tareas del ${d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" })}`}
+                className="mb-2 flex items-center gap-2 rounded-lg px-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
                 <span
                   className={`text-xs font-medium uppercase tracking-wide ${
                     esHoy ? "text-violet-700 dark:text-violet-300" : "text-zinc-400"
@@ -135,7 +147,7 @@ export default function WeeklyCalendar({ tareas, onSeleccionar }: Props) {
                 >
                   {d.getDate()}
                 </span>
-              </div>
+              </button>
 
               <ul className="flex flex-col gap-1">
                 {lista.map((t) => {
@@ -144,7 +156,10 @@ export default function WeeklyCalendar({ tareas, onSeleccionar }: Props) {
                   return (
                     <li key={t.id}>
                       <button
-                        onClick={() => onSeleccionar(t.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSeleccionar(t.id);
+                        }}
                         title={t.titulo}
                         className={`flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-xs font-medium transition ${
                           hecha
